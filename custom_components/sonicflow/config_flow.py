@@ -61,21 +61,29 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
 )
 
 
+
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> bool:
     """Validate the user input allows us to connect."""
-    api = SubsonicApi(hass, data)
+    # ✅ ПРАВИЛЬНО: передаём userAgent и config, а также hass для сессии
+    api = SubsonicApi(
+        userAgent="HomeAssistant",
+        config=data,
+        session=None  # будет создан через hass внутри
+    )
     
     # Validate URL format
     url = data.get(CONF_URL, "")
     if not url.startswith(("http://", "https://")):
         raise InvalidUrl
     
-    # Test connection
-    if not await api.ping():
+    # Test connection - передаём hass!
+    if not await api.ping(hass=hass):
         raise CannotConnect
     
+    # Clean up
+    await api.close()
+    
     return True
-
 
 class SonicFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for SonicFlow."""
