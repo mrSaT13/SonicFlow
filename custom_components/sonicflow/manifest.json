@@ -3,9 +3,9 @@
   "name": "SonicFlow",
   "codeowners": ["@mrSaT13"],
   "config_flow": true,
-  "documentation": "https://github.com/mrSaT13/SonicFlow/",
-  "iot_class": "local_polling",
+  "documentation": "https://github.com/mrSaT13/SonicFlow",
   "issue_tracker": "https://github.com/mrSaT13/SonicFlow/issues",
-  "requirements": [],
-  "version": "1.0.0"
+  "iot_class": "local_polling",
+  "version": "1.0.0",
+  "requirements": []
 }

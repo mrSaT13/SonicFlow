@@ -1,0 +1,52 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SonicFlow Setup",
+        "data": {
+          "url": "Server URL",
+          "user": "Username",
+          "password": "Password",
+          "app": "Server Type",
+          "title": "Custom Name (optional)"
+        },
+        "data_description": {
+          "url": "e.g., http://192.168.1.100:4533"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure SonicFlow",
+        "data": {
+          "url": "Server URL",
+          "user": "Username",
+          "password": "Password",
+          "app": "Server Type"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to server",
+      "invalid_url": "URL must start with http:// or https://",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "SonicFlow is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "SonicFlow Options",
+        "data": {
+          "artists": "Show Artists",
+          "albums": "Show Albums",
+          "playlists": "Show Playlists",
+          "genres": "Show Genres",
+          "radio": "Show Radio",
+          "favorites": "Show Favorites",
+          "songs": "Show All Songs"
+        }
+      }
+    }
+  }
+}
