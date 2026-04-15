@@ -1,4 +1,4 @@
-"""Subsonic API client for SonicFlow."""
+"""Complete Subsonic/Navidrome API Client."""
 from __future__ import annotations
 
 import socket
@@ -12,10 +12,10 @@ from aiohttp import hdrs
 from dataclasses import dataclass, field
 
 from .xmlHelper import (
-    getAttributes,
-    getTagAttributes,
-    getTagsAttributesToList,
-    getTagsTexts,
+    get_root_attrs,
+    elements_to_dicts,
+    element_to_dict,
+    elements_to_texts,
 )
 
 if TYPE_CHECKING:
@@ -26,224 +26,149 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class SubsonicApi:
-    """Subsonic/Navidrome API client."""
-    
     userAgent: str
     config: dict
     session: aiohttp.ClientSession | None = None
-    requestTimeout: float = 8.0
+    requestTimeout: float = 10.0
     apiVersion: str = "1.16.1"
     _close_session: bool = field(default=False, init=False, repr=False)
-    
-    @property
-    def url(self) -> str:
-        return self.__getProperty("url")
-    
-    @property
-    def user(self) -> str:
-        return self.__getProperty("user")
-    
-    @property
-    def password(self) -> str:
-        return self.__getProperty("password")
 
     @property
-    def salt(self) -> str:
-        return secrets.token_hex(5)
-    
-    def __getProperty(self, property_name: str, default_value=None):
-        if self.config is None:
-            return default_value
-        return self.config.get(property_name, default_value)
+    def url(self) -> str: return self.config.get("url", "")
+    @property
+    def user(self) -> str: return self.config.get("user", "")
+    @property
+    def password(self) -> str: return self.config.get("password", "")
 
-    def __generate_token(self, password: str, salt: str) -> str:
-        return hashlib.md5((password + salt).encode()).hexdigest()
+    @property
+    def salt(self) -> str: return secrets.token_hex(6)
+
+    def _token(self, salt: str) -> str:
+        return hashlib.md5((self.password + salt).encode()).hexdigest()
 
     def _get_session(self, hass: HomeAssistant | None = None):
-        """Get or create aiohttp session."""
         if self.session is None:
-            if hass is not None:
+            if hass:
                 from homeassistant.helpers.aiohttp_client import async_get_clientsession
                 self.session = async_get_clientsession(hass)
             else:
                 self.session = aiohttp.ClientSession()
                 self._close_session = True
         return self.session
-    
-    def __get_request_params(self, params: dict | None = None) -> dict:
-        salt = self.salt
-        p = {
-            "u": self.user,
-            "t": self.__generate_token(self.password, salt),
-            "s": salt,
-            "v": self.apiVersion,
-            "c": self.userAgent
-        }
-        if params:
-            p.update(params)
-        return p
 
-    async def __request(self, method: str, path: str, params: dict | None = None, hass: HomeAssistant | None = None):
-        """Make API request."""
+    def _auth_params(self) -> dict:
+        s = self.salt
+        return {"u": self.user, "t": self._token(s), "s": s, "v": self.apiVersion, "c": self.userAgent}
+
+    async def _request(self, method: str, path: str, params: dict | None = None, hass: HomeAssistant | None = None):
         url = f"{self.url}/rest/{path}.view"
-        p = self.__get_request_params(params)
-        headers = {hdrs.USER_AGENT: self.userAgent}
+        p = self._auth_params()
+        if params: p.update(params)
+        
         session = self._get_session(hass)
-
         try:
             async with asyncio.timeout(self.requestTimeout):
-                response = await session.request(
-                    method, url, headers=headers, params=p, raise_for_status=True
-                )
-                content_type = response.headers.get("Content-Type", "")
-                if "application/json" in content_type:
-                    return await response.json()
-                return await response.text()
-                
-        except asyncio.TimeoutError as err:
-            _LOGGER.error("Timeout error: %s", err)
+                async with session.request(method, url, params=p, headers={hdrs.USER_AGENT: self.userAgent}) as resp:
+                    resp.raise_for_status()
+                    return await resp.text()
+        except asyncio.TimeoutError as e:
+            _LOGGER.error("Timeout on %s: %s", path, e)
             raise
-        except (aiohttp.ClientError, socket.gaierror) as err:
-            _LOGGER.error("Connection error: %s", err)
+        except Exception as e:
+            _LOGGER.error("Request failed on %s: %s", path, e)
             raise
 
-    async def close(self) -> None:
-        """Close session if we created it."""
+    async def close(self):
         if self.session and self._close_session:
             await self.session.close()
             self._close_session = False
-    
+
     async def ping(self, hass: HomeAssistant | None = None) -> bool:
-        """Test connection."""
         try:
-            response = await self.__request("GET", "ping", hass=hass)
-            attrs = getAttributes(response)
-            return attrs.get("status") == "ok"
-        except Exception as err:
-            _LOGGER.error("Ping failed: %s", err)
-            return False
-    
-    async def get_radio_stations(self, hass: HomeAssistant | None = None) -> list:
-        response = await self.__request("GET", "getInternetRadioStations", hass=hass)
-        return getTagsAttributesToList(response, "internetRadioStation")
-    
-    async def get_albums(self, hass: HomeAssistant | None = None) -> list:
-        response = await self.__request("GET", "getAlbumList2", {"type": "alphabeticalByName"}, hass=hass)
-        return getTagsAttributesToList(response, "album")
-    
-    async def get_album(self, album_id: str, hass: HomeAssistant | None = None) -> dict:
-        response = await self.__request("GET", "getAlbum", {"id": album_id}, hass=hass)
-        album = getTagAttributes(response, "album")
-        album["songs"] = getTagsAttributesToList(response, "song")
-        return album
-
-    async def get_playlists(self, hass: HomeAssistant | None = None) -> list:
-        response = await self.__request("GET", "getPlaylists", hass=hass)
-        return getTagsAttributesToList(response, "playlist")
-    
-    async def get_playlist(self, playlist_id: str, hass: HomeAssistant | None = None) -> dict:
-        response = await self.__request("GET", "getPlaylist", {"id": playlist_id}, hass=hass)
-        playlist = getTagAttributes(response, "playlist")
-        playlist["songs"] = getTagsAttributesToList(response, "entry")
-        return playlist
-
-    async def get_genres(self, hass: HomeAssistant | None = None) -> list[str]:
-        response = await self.__request("GET", "getGenres", hass=hass)
-        return getTagsTexts(response, "genre")
-    
-    async def get_songs_by_genre(self, genre: str, hass: HomeAssistant | None = None) -> list:
-        response = await self.__request("GET", "getSongsByGenre", {"genre": genre}, hass=hass)
-        return getTagsAttributesToList(response, "song")
-    
-    async def get_artists(self, hass: HomeAssistant | None = None) -> list:
-        response = await self.__request("GET", "getArtists", hass=hass)
-        return getTagsAttributesToList(response, "artist")
-    
-    async def get_artist(self, artist_id: str, hass: HomeAssistant | None = None) -> dict:
-        response = await self.__request("GET", "getArtist", {"id": artist_id}, hass=hass)
-        artist = getTagAttributes(response, "artist")
-        artist["albums"] = getTagsAttributesToList(response, "album")
-        return artist
-
-    async def get_song(self, song_id: str, hass: HomeAssistant | None = None) -> dict:
-        response = await self.__request("GET", "getSong", {"id": song_id}, hass=hass)
-        return getTagAttributes(response, "song")
-
-    async def get_starred(self, hass: HomeAssistant | None = None) -> dict:
-        """Get starred items."""
-        response = await self.__request("GET", "getStarred2", hass=hass)
-        return {
-            "artists": getTagsAttributesToList(response, "artist"),
-            "albums": getTagsAttributesToList(response, "album"),
-            "songs": getTagsAttributesToList(response, "song"),
-        }
-
-    async def get_random_songs(self, size: int = 50, hass: HomeAssistant | None = None) -> list:
-        """Get random songs."""
-        response = await self.__request("GET", "getRandomSongs", {"size": size}, hass=hass)
-        return getTagsAttributesToList(response, "song")
-
-    async def search(self, query: str, hass: HomeAssistant | None = None) -> dict:
-        """Search for artists, albums, songs."""
-        response = await self.__request("GET", "search3", {"query": query, "songCount": 50}, hass=hass)
-        return {
-            "artists": getTagsAttributesToList(response, "artist"),
-            "albums": getTagsAttributesToList(response, "album"),
-            "songs": getTagsAttributesToList(response, "song"),
-        }
-
-    async def star(self, item_id: str, hass: HomeAssistant | None = None) -> bool:
-        """Star an item."""
-        try:
-            await self.__request("GET", "star", {"id": item_id}, hass=hass)
-            return True
-        except Exception as err:
-            _LOGGER.error("Failed to star %s: %s", item_id, err)
+            xml = await self._request("GET", "ping", hass=hass)
+            return get_root_attrs(xml).get("status") == "ok"
+        except Exception as e:
+            _LOGGER.error("Ping failed: %s", e)
             return False
 
-    async def unstar(self, item_id: str, hass: HomeAssistant | None = None) -> bool:
-        """Unstar an item."""
-        try:
-            await self.__request("GET", "unstar", {"id": item_id}, hass=hass)
-            return True
-        except Exception as err:
-            _LOGGER.error("Failed to unstar %s: %s", item_id, err)
-            return False
-
-    def get_cover_art_url(self, art_id: str) -> str:
-        """Get cover art URL."""
-        params = self.__get_request_params({"id": art_id})
-        query = "&".join(f"{k}={v}" for k, v in params.items())
-        return f"{self.url}/rest/getCoverArt.view?{query}"
-
+    # 🎵 Stream & Cover URLs (генерируются свежими при каждом вызове!)
     def get_stream_url(self, song_id: str) -> str:
-        """Get stream URL for a song."""
-        params = self.__get_request_params({"id": song_id})
-        query = "&".join(f"{k}={v}" for k, v in params.items())
+        p = self._auth_params()
+        p["id"] = song_id
+        query = "&".join(f"{k}={v}" for k, v in p.items())
         return f"{self.url}/rest/stream.view?{query}"
 
-    async def __aenter__(self) -> SubsonicApi:
-        return self
-    
-    async def __aexit__(self, *exc_info: object) -> None:
-        await self.close()
-        
-    async def get_now_playing(self, hass: HomeAssistant | None = None) -> list:
-        """Get list of currently playing entries."""
-        response = await self.__request("GET", "getNowPlaying", hass=hass)
-        return getTagsAttributesToList(response, "entry")
-    
-    async def scrobble(
-        self, 
-        song_id: str, 
-        submission: bool = True, 
-        hass: HomeAssistant | None = None
-    ) -> bool:
-        """Scrobble a song (report playback)."""
+    def get_cover_art_url(self, cover_id: str) -> str | None:
+        if not cover_id: return None
+        p = self._auth_params()
+        p["id"] = cover_id
+        query = "&".join(f"{k}={v}" for k, v in p.items())
+        return f"{self.url}/rest/getCoverArt.view?{query}"
+
+    # 📚 Library Endpoints
+    async def get_artists(self, hass: HomeAssistant | None = None):
+        xml = await self._request("GET", "getArtists", hass=hass)
+        # Subsonic возвращает <artists><artist>...</artist>...</artists>
+        return elements_to_dicts(xml, "artist")
+
+    async def get_artist(self, artist_id: str, hass: HomeAssistant | None = None):
+        xml = await self._request("GET", "getArtist", {"id": artist_id}, hass=hass)
+        data = element_to_dict(xml, "artist")
+        data["albums"] = elements_to_dicts(xml, "album")
+        return data
+
+    async def get_album(self, album_id: str, hass: HomeAssistant | None = None):
+        xml = await self._request("GET", "getAlbum", {"id": album_id}, hass=hass)
+        data = element_to_dict(xml, "album")
+        data["songs"] = elements_to_dicts(xml, "song")
+        return data
+
+    async def get_song(self, song_id: str, hass: HomeAssistant | None = None):
+        xml = await self._request("GET", "getSong", {"id": song_id}, hass=hass)
+        return element_to_dict(xml, "song")
+
+    async def get_playlists(self, hass: HomeAssistant | None = None):
+        xml = await self._request("GET", "getPlaylists", hass=hass)
+        return elements_to_dicts(xml, "playlist")
+
+    async def get_playlist(self, playlist_id: str, hass: HomeAssistant | None = None):
+        xml = await self._request("GET", "getPlaylist", {"id": playlist_id}, hass=hass)
+        data = element_to_dict(xml, "playlist")
+        data["songs"] = elements_to_dicts(xml, "entry")
+        return data
+
+    async def get_genres(self, hass: HomeAssistant | None = None):
+        xml = await self._request("GET", "getGenres", hass=hass)
+        return elements_to_texts(xml, "genre")
+
+    async def get_songs_by_genre(self, genre: str, hass: HomeAssistant | None = None):
+        xml = await self._request("GET", "getSongsByGenre", {"genre": genre}, hass=hass)
+        return elements_to_dicts(xml, "song")
+
+    async def get_radio_stations(self, hass: HomeAssistant | None = None):
+        xml = await self._request("GET", "getInternetRadioStations", hass=hass)
+        return elements_to_dicts(xml, "internetRadioStation")
+
+    async def get_random_songs(self, size: int = 50, hass: HomeAssistant | None = None):
+        xml = await self._request("GET", "getRandomSongs", {"size": size}, hass=hass)
+        return elements_to_dicts(xml, "song")
+
+    async def search(self, query: str, hass: HomeAssistant | None = None):
+        xml = await self._request("GET", "search3", {"query": query, "artistCount": 20, "albumCount": 20, "songCount": 50}, hass=hass)
+        return {
+            "artists": elements_to_dicts(xml, "artist"),
+            "albums": elements_to_dicts(xml, "album"),
+            "songs": elements_to_dicts(xml, "song")
+        }
+
+    async def get_now_playing(self, hass: HomeAssistant | None = None):
+        xml = await self._request("GET", "getNowPlaying", hass=hass)
+        return elements_to_dicts(xml, "entry")
+
+    async def scrobble(self, song_id: str, submission: bool = True, hass: HomeAssistant | None = None) -> bool:
         try:
-            params = {"id": song_id, "submission": "true" if submission else "false"}
-            await self.__request("GET", "scrobble", params, hass=hass)
+            await self._request("GET", "scrobble", {"id": song_id, "submission": "true" if submission else "false"}, hass=hass)
             return True
-        except Exception as err:
-            _LOGGER.error("Failed to scrobble %s: %s", song_id, err)
+        except Exception as e:
+            _LOGGER.error("Scrobble failed: %s", e)
             return False
