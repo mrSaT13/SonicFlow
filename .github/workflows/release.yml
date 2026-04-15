@@ -1,0 +1,24 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  release:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Zip custom component
+        run: |
+          cd custom_components/sonicflow
+          zip -r ../../sonicflow.zip .
+      
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: sonicflow.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
