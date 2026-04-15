@@ -5,6 +5,7 @@ import logging
 from datetime import timedelta
 
 from homeassistant.components.media_player import (
+    BrowseMedia,
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
     MediaType,
@@ -27,19 +28,19 @@ async def async_setup_entry(
 ) -> None:
     _LOGGER.debug("Setting up media_player for entry %s", entry.entry_id)
     
-    # 🔍 Безопасная проверка хранилища
     if DOMAIN not in hass.data:
-        _LOGGER.error("❌ DOMAIN '%s' not in hass.data!", DOMAIN)
+        _LOGGER.error("DOMAIN '%s' not in hass.data!", DOMAIN)
         return
     if entry.entry_id not in hass.data[DOMAIN]:
-        _LOGGER.error("❌ entry_id '%s' missing in hass.data[%s]!", entry.entry_id, DOMAIN)
+        _LOGGER.error("entry_id '%s' missing in hass.data[%s]!", entry.entry_id, DOMAIN)
         return
         
     api: SubsonicApi = hass.data[DOMAIN][entry.entry_id]
-    _LOGGER.info("✅ API retrieved successfully")
+    _LOGGER.info("✅ API retrieved successfully for %s", entry.title)
     
     entity = SonicFlowMediaPlayer(api, entry)
     async_add_entities([entity], update_before_add=True)
+
 
 class SonicFlowMediaPlayer(MediaPlayerEntity):
     _attr_has_entity_name = True
@@ -131,18 +132,57 @@ class SonicFlowMediaPlayer(MediaPlayerEntity):
     async def async_mute_volume(self, mute: bool) -> None: pass
 
     async def async_play_media(self, media_type: str, media_id: str, **kwargs) -> None:
-        _LOGGER.info("▶️ Play requested: %s", media_id)
-        self._media = {"id": media_id, "title": "Loading..."}
+        _LOGGER.info("▶️ Play requested: %s (type: %s)", media_id, media_type)
+        # Формируем авторизованную ссылку на поток
+        stream_url = self.api.get_stream_url(media_id)
+        self._media = {"id": media_id, "title": media_id, "coverArt": ""}
+        self._attr_media_content_id = stream_url
         self._state = STATE_PLAYING
         self.async_write_ha_state()
 
     async def async_browse_media(self, media_content_type=None, media_content_id=None):
-        from homeassistant.components.media_player import BrowseMedia
+        """Возвращает дерево медиа-библиотеки (исправленная сигнатура HA)."""
+        if media_content_type is None or media_content_type == "library":
+            return BrowseMedia(
+                media_class="directory",
+                media_content_type="library",
+                media_content_id="",
+                title="SonicFlow Library",
+                can_play=False,
+                can_expand=True,
+                children=[
+                    BrowseMedia(
+                        media_class="artist",
+                        media_content_type="artists",
+                        media_content_id="artists",
+                        title="Artists",
+                        can_play=False,
+                        can_expand=True,
+                    ),
+                    BrowseMedia(
+                        media_class="album",
+                        media_content_type="albums",
+                        media_content_id="albums",
+                        title="Albums",
+                        can_play=False,
+                        can_expand=True,
+                    ),
+                    BrowseMedia(
+                        media_class="playlist",
+                        media_content_type="playlists",
+                        media_content_id="playlists",
+                        title="Playlists",
+                        can_play=False,
+                        can_expand=True,
+                    ),
+                ]
+            )
+        # Заглушка для вложенных папок (чтобы не падало при клике)
         return BrowseMedia(
-            title="SonicFlow Library",
-            domain=DOMAIN,
-            media_content_type="library",
-            media_content_id="root",
+            media_class="directory",
+            media_content_type=media_content_type or "",
+            media_content_id=media_content_id or "",
+            title="Loading...",
             can_play=False,
-            can_expand=True,
+            can_expand=False,
         )
