@@ -12,7 +12,8 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from .const import DOMAIN, CONF_URL, CONF_USER, CONF_PASSWORD, CONF_APP
 from .subsonicApi import SubsonicApi
 
-PLATFORMS: Final[list[Platform]] = [Platform.MEDIA_PLAYER, Platform.MEDIA_SOURCE]
+# ✅ ИСПРАВЛЕНО: Только существующие платформы
+PLATFORMS: Final[list[Platform]] = [Platform.MEDIA_PLAYER]
 _LOGGER = logging.getLogger(__name__)
 
 
