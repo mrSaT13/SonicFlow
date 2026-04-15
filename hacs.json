@@ -1,6 +1,11 @@
 {
-    "name": "Subsonic",
-    "domains": ["subsonic"],
-    "render_readme": false,
-    "homeassistant": "0.110.2"
-  }
+  "name": "SonicFlow",
+  "content_in_root": false,
+  "render_readme": true,
+  "homeassistant": "2023.1.0",
+  "zip_release": true,
+  "filename": "sonicflow.zip",
+  "persistent_directory": false,
+  "countries": ["US", "RU", "BR", "DE"],
+  "hacs": "1.20.0"
+}
