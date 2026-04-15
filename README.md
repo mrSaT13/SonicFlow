@@ -75,3 +75,68 @@ sonicflow:
     password: your_password
     app: navidrome
     title: My Music Server
+```
+
+### Usage
+
+### Media Browser
+After setup, you can browse your music library through the Home Assistant Media Browser:
+Go to Media in the sidebar
+Select your SonicFlow media player
+Browse by:
+Artists
+Albums
+Playlists
+Genres
+Favorites
+Songs
+Media Player Controls
+The integration creates a media player entity that you can control:
+
+### Example automation
+```yaml
+automation:
+  - alias: "Play morning playlist"
+    trigger:
+      platform: time
+      at: "07:00:00"
+    action:
+      service: media_player.play_media
+      target:
+        entity_id: media_player.sonicflow
+      data:
+        media_content_id: "playlist:123"
+        media_content_type: "playlist"
+```
+###  Entities
+Media Player
+Entity ID: media_player.sonicflow
+Features:
+Play/Pause/Stop
+Next/Previous track
+Volume control
+Shuffle/Repeat modes
+###  Media Source
+Access your music library through Home Assistant's media source system.
+###  API Compatibility
+SonicFlow is compatible with:
+✅ Subsonic API v1.16.1+
+✅ Navidrome
+✅ Airsonic
+✅ Libresonic
+✅ Other Subsonic-compatible servers
+###  Troubleshooting
+### Connection Issues
+Make sure your Subsonic server is accessible from Home Assistant
+Check the URL (must include http:// or https://)
+Verify username and password
+Check firewall settings
+### No Music Appearing
+Ensure your music library is scanned
+Check that you've enabled the desired categories in configuration
+Verify user permissions on the Subsonic server
+
+###  Credits
+Original work based on ha-subsonic by @tiorac
+###  License
+This project is licensed under the MIT License - see the LICENSE file for details.
