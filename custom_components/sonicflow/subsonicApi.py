@@ -227,3 +227,23 @@ class SubsonicApi:
     
     async def __aexit__(self, *exc_info: object) -> None:
         await self.close()
+        
+    async def get_now_playing(self, hass: HomeAssistant | None = None) -> list:
+        """Get list of currently playing entries."""
+        response = await self.__request("GET", "getNowPlaying", hass=hass)
+        return getTagsAttributesToList(response, "entry")
+    
+    async def scrobble(
+        self, 
+        song_id: str, 
+        submission: bool = True, 
+        hass: HomeAssistant | None = None
+    ) -> bool:
+        """Scrobble a song (report playback)."""
+        try:
+            params = {"id": song_id, "submission": "true" if submission else "false"}
+            await self.__request("GET", "scrobble", params, hass=hass)
+            return True
+        except Exception as err:
+            _LOGGER.error("Failed to scrobble %s: %s", song_id, err)
+            return False

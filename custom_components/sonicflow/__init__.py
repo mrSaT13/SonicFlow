@@ -12,7 +12,6 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from .const import DOMAIN, CONF_URL, CONF_USER, CONF_PASSWORD, CONF_APP
 from .subsonicApi import SubsonicApi
 
-# ✅ ИСПРАВЛЕНО: Только существующие платформы
 PLATFORMS: Final[list[Platform]] = [Platform.MEDIA_PLAYER]
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,9 +40,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await api.close()
         raise ConfigEntryNotReady(f"Error connecting to SonicFlow: {err}") from err
     
-    # Store API instance
+    # ✅ ИСПРАВЛЕНО: сохраняем ВНУТРИ DOMAIN, а не в корне hass.data
     hass.data.setdefault(DOMAIN, {})
-    hass.data[entry.entry_id] = api
+    hass.data[DOMAIN][entry.entry_id] = api
     
     # Forward entry setup to platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -55,6 +54,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     
+    # ✅ ИСПРАВЛЕНО: корректная очистка из DOMAIN
     if unload_ok and entry.entry_id in hass.data.get(DOMAIN, {}):
         api = hass.data[DOMAIN][entry.entry_id]
         await api.close()
@@ -68,7 +68,6 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     _LOGGER.debug("Migrating from version %s", config_entry.version)
     
     if config_entry.version == 1:
-        # Nothing to migrate for now
         pass
     
     _LOGGER.info("Migration to version %s successful", config_entry.version)
