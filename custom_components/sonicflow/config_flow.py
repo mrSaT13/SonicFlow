@@ -26,7 +26,6 @@ from .const import (
     DEFAULT_APP,
     DEFAULT_OPTIONS,
     DOMAIN,
-    LOGGER,
     TITLE,
 )
 from .subsonicApi import SubsonicApi
@@ -61,29 +60,28 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
 )
 
 
-
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> bool:
     """Validate the user input allows us to connect."""
-    # ✅ ПРАВИЛЬНО: передаём userAgent и config, а также hass для сессии
     api = SubsonicApi(
-        userAgent="HomeAssistant",
+        userAgent="HomeAssistant/SonicFlow",
         config=data,
-        session=None  # будет создан через hass внутри
+        session=None,
     )
     
     # Validate URL format
     url = data.get(CONF_URL, "")
     if not url.startswith(("http://", "https://")):
+        await api.close()
         raise InvalidUrl
     
-    # Test connection - передаём hass!
+    # Test connection
     if not await api.ping(hass=hass):
+        await api.close()
         raise CannotConnect
     
-    # Clean up
     await api.close()
-    
     return True
+
 
 class SonicFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for SonicFlow."""
@@ -103,17 +101,15 @@ class SonicFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
             except InvalidUrl:
                 errors["base"] = "invalid_url"
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
             else:
-                # Store title
                 app = user_input[CONF_APP]
                 title = user_input.get("title", "").strip()
                 if not title:
                     title = TITLE.get(app, "SonicFlow")
                 
-                # Create entry with data and default options
                 return self.async_create_entry(
                     title=title,
                     data={

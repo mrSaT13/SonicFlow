@@ -1,14 +1,9 @@
 """Constants for SonicFlow integration."""
 from __future__ import annotations
 
-import logging
 from typing import Final
 
-# ⚠️ ВАЖНО: Только стандартная библиотека и homeassistant!
-# НЕ импортировать ничего из . (текущей папки)!
-
 DOMAIN: Final = "sonicflow"
-LOGGER: Final = logging.getLogger(__package__)
 
 # Configuration keys
 CONF_URL: Final = "url"

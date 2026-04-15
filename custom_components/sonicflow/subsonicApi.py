@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 from aiohttp import hdrs
 from dataclasses import dataclass, field
 
-from .const import LOGGER
 from .xmlHelper import (
     getAttributes,
     getTagAttributes,
@@ -21,6 +20,8 @@ from .xmlHelper import (
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -100,10 +101,10 @@ class SubsonicApi:
                 return await response.text()
                 
         except asyncio.TimeoutError as err:
-            LOGGER.error("Timeout error: %s", err)
+            _LOGGER.error("Timeout error: %s", err)
             raise
         except (aiohttp.ClientError, socket.gaierror) as err:
-            LOGGER.error("Connection error: %s", err)
+            _LOGGER.error("Connection error: %s", err)
             raise
 
     async def close(self) -> None:
@@ -119,7 +120,7 @@ class SubsonicApi:
             attrs = getAttributes(response)
             return attrs.get("status") == "ok"
         except Exception as err:
-            LOGGER.error("Ping failed: %s", err)
+            _LOGGER.error("Ping failed: %s", err)
             return False
     
     async def get_radio_stations(self, hass: HomeAssistant | None = None) -> list:
@@ -197,7 +198,7 @@ class SubsonicApi:
             await self.__request("GET", "star", {"id": item_id}, hass=hass)
             return True
         except Exception as err:
-            LOGGER.error("Failed to star %s: %s", item_id, err)
+            _LOGGER.error("Failed to star %s: %s", item_id, err)
             return False
 
     async def unstar(self, item_id: str, hass: HomeAssistant | None = None) -> bool:
@@ -206,7 +207,7 @@ class SubsonicApi:
             await self.__request("GET", "unstar", {"id": item_id}, hass=hass)
             return True
         except Exception as err:
-            LOGGER.error("Failed to unstar %s: %s", item_id, err)
+            _LOGGER.error("Failed to unstar %s: %s", item_id, err)
             return False
 
     def get_cover_art_url(self, art_id: str) -> str:
