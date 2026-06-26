@@ -234,9 +234,9 @@ class SubsonicApi:
         return getTagsAttributesToList(response, "entry")
     
     async def scrobble(
-        self, 
-        song_id: str, 
-        submission: bool = True, 
+        self,
+        song_id: str,
+        submission: bool = True,
         hass: HomeAssistant | None = None
     ) -> bool:
         """Scrobble a song (report playback)."""
@@ -247,3 +247,85 @@ class SubsonicApi:
         except Exception as err:
             _LOGGER.error("Failed to scrobble %s: %s", song_id, err)
             return False
+
+    async def get_similar_songs(self, song_id: str, count: int = 20, hass: HomeAssistant | None = None) -> list:
+        """Get songs similar to given song."""
+        try:
+            response = await self.__request(
+                "GET", "getSimilarSongs2",
+                {"id": song_id, "count": count}, hass=hass
+            )
+            return getTagsAttributesToList(response, "song")
+        except Exception as err:
+            _LOGGER.error("Failed to get similar songs: %s", err)
+            return []
+
+    async def get_top_songs(self, artist: str, count: int = 50, hass: HomeAssistant | None = None) -> list:
+        """Get top songs for an artist."""
+        try:
+            response = await self.__request(
+                "GET", "getTopSongs",
+                {"artist": artist, "count": count}, hass=hass
+            )
+            return getTagsAttributesToList(response, "song")
+        except Exception as err:
+            _LOGGER.error("Failed to get top songs: %s", err)
+            return []
+
+    async def get_music_folders(self, hass: HomeAssistant | None = None) -> list:
+        """Get all music folders."""
+        try:
+            response = await self.__request("GET", "getMusicFolders", hass=hass)
+            return getTagsAttributesToList(response, "musicFolder")
+        except Exception as err:
+            _LOGGER.error("Failed to get music folders: %s", err)
+            return []
+
+    async def get_index(self, hass: HomeAssistant | None = None) -> dict:
+        """Get indexed artists list."""
+        try:
+            response = await self.__request("GET", "getArtists", hass=hass)
+            artists = getTagsAttributesToList(response, "artist")
+            indexed = {}
+            for artist in artists:
+                name = artist.get("name", "")
+                if name:
+                    letter = name[0].upper()
+                    if letter not in indexed:
+                        indexed[letter] = []
+                    indexed[letter].append(artist)
+            return indexed
+        except Exception as err:
+            _LOGGER.error("Failed to get index: %s", err)
+            return {}
+
+    async def get_bookmarks(self, hass: HomeAssistant | None = None) -> list:
+        """Get user bookmarks (resume positions)."""
+        try:
+            response = await self.__request("GET", "getBookmarks", hass=hass)
+            return getTagsAttributesToList(response, "bookmark")
+        except Exception as err:
+            _LOGGER.error("Failed to get bookmarks: %s", err)
+            return []
+
+    async def create_playlist(self, name: str, song_ids: list[str], hass: HomeAssistant | None = None) -> str | None:
+        """Create a new playlist. Returns playlist ID."""
+        try:
+            params = {"name": name}
+            for i, sid in enumerate(song_ids):
+                params[f"songId"] = sid
+            response = await self.__request("GET", "createPlaylist", params, hass=hass)
+            playlist = getTagAttributes(response, "playlist")
+            return playlist.get("id")
+        except Exception as err:
+            _LOGGER.error("Failed to create playlist: %s", err)
+            return None
+
+    def get_server_info(self) -> dict:
+        """Return basic server info for diagnostics."""
+        return {
+            "url": self.url,
+            "user": self.user,
+            "api_version": self.apiVersion,
+            "user_agent": self.userAgent,
+        }

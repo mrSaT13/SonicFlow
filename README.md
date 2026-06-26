@@ -14,13 +14,15 @@
 
 ### Features
 
-- 🎵 Browse your music library (Artists, Albums, Playlists, Genres)
+- 🎵 Browse your music library (Artists, Albums, Playlists, Genres, Favorites)
 - 🎧 Stream music through Home Assistant media players
 - ⭐ Access your favorite tracks, albums, and artists
 - 📻 Internet radio support
-- 🎼 Smart playlists and recommendations
-- 🔄 Real-time scrobbling to Last.fm
+- 🔀 Random and Recently Added playlists
 - 🎨 Beautiful cover art integration
+- 📊 Now Playing sensors (track, artist, album)
+- 🔧 Smart services for automations
+- 🌍 Multi-language support (EN, RU, PT-BR, DE)
 
 ## Installation
 
@@ -30,7 +32,7 @@
 2. Click on "Integrations"
 3. Click the three dots in the top right corner
 4. Select "Custom repositories"
-5. Add this repository: `https://github.com/your-github-username/sonicflow`
+5. Add this repository: `https://github.com/mrSaT13/SonicFlow`
 6. Select category: "Integration"
 7. Click "Add"
 8. Find "SonicFlow" in the list and click "Download"
@@ -38,7 +40,7 @@
 
 ### Option 2: Manual Installation
 
-1. Download the latest release from [GitHub](https://github.com/your-github-username/sonicflow/releases)
+1. Download the latest release from [GitHub](https://github.com/mrSaT13/SonicFlow/releases)
 2. Copy the `custom_components/sonicflow` folder to your Home Assistant `custom_components` directory
 3. Restart Home Assistant
 
@@ -55,7 +57,6 @@
    - **Password**: Your Subsonic password
    - **App Type**: Choose between Subsonic or Navidrome
    - **Title**: Custom name (optional)
-
 5. Select what to display:
    - ✅ Artists
    - ✅ Albums
@@ -68,7 +69,6 @@
 ### YAML Configuration
 
 ```yaml
-# Example configuration.yaml entry
 sonicflow:
   - url: http://192.168.1.100:4533
     user: your_username
@@ -77,23 +77,76 @@ sonicflow:
     title: My Music Server
 ```
 
-### Usage
+## Usage
 
 ### Media Browser
-After setup, you can browse your music library through the Home Assistant Media Browser:
-Go to Media in the sidebar
-Select your SonicFlow media player
-Browse by:
-Artists
-Albums
-Playlists
-Genres
-Favorites
-Songs
-Media Player Controls
-The integration creates a media player entity that you can control:
 
-### Example automation
+After setup, you can browse your music library through the Home Assistant Media Browser:
+1. Go to **Media** in the sidebar
+2. Select your SonicFlow media player
+3. Browse by: Artists, Albums, Playlists, Genres, Favorites, Radio, Recently Added, Random
+
+### Media Player Controls
+
+The integration creates a media player entity that you can control:
+- Play/Pause/Stop
+- Next/Previous track
+- Volume control
+- Shuffle/Repeat modes
+- Browse Media
+
+### Sensors
+
+SonicFlow creates the following sensor entities:
+- `sensor.sonicflow_now_playing` — current track title
+- `sensor.sonicflow_artist` — current artist
+- `sensor.sonicflow_album` — current album
+
+### Services
+
+SonicFlow exposes the following services for use in automations:
+
+#### `sonicflow.play_favorite`
+Play a random favorite song on the first available media player.
+
+```yaml
+action:
+  - service: sonicflow.play_favorite
+```
+
+#### `sonicflow.play_random`
+Play a random song on the first available media player.
+
+```yaml
+action:
+  - service: sonicflow.play_random
+  data:
+    count: 50
+```
+
+#### `sonicflow.search_and_play`
+Search for a song and play the first result.
+
+```yaml
+action:
+  - service: sonicflow.search_and_play
+  data:
+    query: "Bohemian Rhapsody"
+```
+
+#### `sonicflow.star` / `sonicflow.unstar`
+Star or unstar an item on the server.
+
+```yaml
+action:
+  - service: sonicflow.star
+  data:
+    item_id: "s-1234"
+```
+
+### Example Automations
+
+#### Play morning playlist
 ```yaml
 automation:
   - alias: "Play morning playlist"
@@ -101,42 +154,66 @@ automation:
       platform: time
       at: "07:00:00"
     action:
-      service: media_player.play_media
-      target:
-        entity_id: media_player.sonicflow
-      data:
-        media_content_id: "playlist:123"
-        media_content_type: "playlist"
+      - service: media_player.play_media
+        target:
+          entity_id: media_player.sonicflow
+        data:
+          media_content_id: "playlist:123"
+          media_content_type: "playlist"
 ```
-###  Entities
-Media Player
-Entity ID: media_player.sonicflow
-Features:
-Play/Pause/Stop
-Next/Previous track
-Volume control
-Shuffle/Repeat modes
-###  Media Source
-Access your music library through Home Assistant's media source system.
-###  API Compatibility
-SonicFlow is compatible with:
-✅ Subsonic API v1.16.1+
-✅ Navidrome
-✅ Airsonic
-✅ Libresonic
-✅ Other Subsonic-compatible servers
-###  Troubleshooting
-### Connection Issues
-Make sure your Subsonic server is accessible from Home Assistant
-Check the URL (must include http:// or https://)
-Verify username and password
-Check firewall settings
-### No Music Appearing
-Ensure your music library is scanned
-Check that you've enabled the desired categories in configuration
-Verify user permissions on the Subsonic server
 
-###  Credits
+#### Play random on motion
+```yaml
+automation:
+  - alias: "Play music on motion"
+    trigger:
+      platform: state
+      entity_id: binary_sensor.motion
+      to: "on"
+    action:
+      - service: sonicflow.play_random
+```
+
+## Entities
+
+### Media Player
+- **Entity ID**: `media_player.sonicflow`
+- **Features**: Play/Pause/Stop, Next/Previous, Volume, Shuffle/Repeat, Browse Media
+
+### Sensors
+- `sensor.sonicflow_now_playing` — current track title
+- `sensor.sonicflow_artist` — current artist
+- `sensor.sonicflow_album` — current album
+
+## API Compatibility
+
+SonicFlow is compatible with:
+- ✅ Subsonic API v1.16.1+
+- ✅ Navidrome
+- ✅ Airsonic
+- ✅ Libresonic
+- ✅ Other Subsonic-compatible servers
+
+## Troubleshooting
+
+### Connection Issues
+- Make sure your Subsonic server is accessible from Home Assistant
+- Check the URL (must include `http://` or `https://`)
+- Verify username and password
+- Check firewall settings
+
+### No Music Appearing
+- Ensure your music library is scanned
+- Check that you've enabled the desired categories in configuration
+- Verify user permissions on the Subsonic server
+
+### Diagnostics
+Go to **Settings** → **Devices & Services** → **SonicFlow** → **Download Diagnostics** to get detailed info about your connection.
+
+## Credits
+
 Original work based on ha-subsonic by @tiorac
-###  License
+
+## License
+
 This project is licensed under the MIT License - see the LICENSE file for details.

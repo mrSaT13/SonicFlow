@@ -1,0 +1,92 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Настройка SonicFlow",
+        "description": "Подключение к серверу Subsonic/Navidrome",
+        "data": {
+          "url": "URL сервера",
+          "user": "Имя пользователя",
+          "password": "Пароль",
+          "app": "Тип сервера",
+          "app_options": {
+            "navidrome": "Navidrome",
+            "subsonic": "Subsonic или совместимый"
+          },
+          "title": "Название"
+        },
+        "data_description": {
+          "url": "Например, http://192.168.1.100:4533"
+        }
+      },
+      "reconfigure": {
+        "title": "Перенастройка SonicFlow",
+        "data": {
+          "url": "URL сервера",
+          "user": "Имя пользователя",
+          "password": "Пароль",
+          "app": "Тип сервера"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Не удалось подключиться к серверу. Проверьте настройки и попробуйте снова.",
+      "invalid_url": "URL должен начинаться с http:// или https://",
+      "unknown": "Произошла непредвиденная ошибка"
+    },
+    "abort": {
+      "already_configured": "SonicFlow уже настроен"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Настройки SonicFlow",
+        "description": "Выберите категории для отображения",
+        "data": {
+          "artists": "Исполнители",
+          "albums": "Альбомы",
+          "playlists": "Плейлисты",
+          "genres": "Жанры",
+          "radio": "Радио",
+          "favorites": "Избранное",
+          "songs": "Все песни"
+        }
+      }
+    }
+  },
+  "services": {
+    "play_favorite": {
+      "name": "Воспроизвести избранное",
+      "description": "Воспроизвести случайную избранную песню."
+    },
+    "play_random": {
+      "name": "Воспроизвести случайное",
+      "description": "Воспроизвести случайную песню.",
+      "fields": {
+        "count": {
+          "name": "Количество",
+          "description": "Количество случайных песен для выбора."
+        }
+      }
+    },
+    "search_and_play": {
+      "name": "Найти и воспроизвести",
+      "description": "Поискать и воспроизвести первый результат.",
+      "fields": {
+        "query": {
+          "name": "Запрос",
+          "description": "Поисковый запрос."
+        }
+      }
+    },
+    "star": {
+      "name": "Добавить в избранное",
+      "description": "Добавить элемент в избранное на сервере."
+    },
+    "unstar": {
+      "name": "Убрать из избранного",
+      "description": "Убрать элемент из избранного на сервере."
+    }
+  }
+}

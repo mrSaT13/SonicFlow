@@ -108,7 +108,8 @@ class SonicFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 app = user_input[CONF_APP]
                 title = user_input.get("title", "").strip()
                 if not title:
-                    title = TITLE.get(app, "SonicFlow")
+                    app_name = TITLE.get(app, "SonicFlow")
+                    title = f"SonicFlow - {app_name}"
                 
                 return self.async_create_entry(
                     title=title,

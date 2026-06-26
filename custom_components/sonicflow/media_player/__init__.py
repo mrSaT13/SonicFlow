@@ -10,6 +10,13 @@ from homeassistant.components.media_player import (
     MediaPlayerEntityFeature,
     MediaType,
 )
+from homeassistant.components.media_player.const import (
+    MEDIA_CLASS_DIRECTORY,
+    MEDIA_CLASS_ARTIST,
+    MEDIA_CLASS_ALBUM,
+    MEDIA_CLASS_PLAYLIST,
+    MEDIA_CLASS_MUSIC,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_IDLE, STATE_PLAYING
 from homeassistant.core import HomeAssistant
@@ -21,23 +28,22 @@ from ..subsonicApi import SubsonicApi
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(seconds=15)
 
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     _LOGGER.debug("Setting up media_player for entry %s", entry.entry_id)
-    
+
     if DOMAIN not in hass.data:
         _LOGGER.error("DOMAIN '%s' not in hass.data!", DOMAIN)
         return
     if entry.entry_id not in hass.data[DOMAIN]:
         _LOGGER.error("entry_id '%s' missing in hass.data[%s]!", entry.entry_id, DOMAIN)
         return
-        
+
     api: SubsonicApi = hass.data[DOMAIN][entry.entry_id]
-    _LOGGER.info("✅ API retrieved successfully for %s", entry.title)
-    
     entity = SonicFlowMediaPlayer(api, entry)
     async_add_entities([entity], update_before_add=True)
 
@@ -46,15 +52,17 @@ class SonicFlowMediaPlayer(MediaPlayerEntity):
     _attr_has_entity_name = True
     _attr_name = None
     _attr_supported_features = (
-        MediaPlayerEntityFeature.PLAY |
-        MediaPlayerEntityFeature.PAUSE |
-        MediaPlayerEntityFeature.STOP |
-        MediaPlayerEntityFeature.NEXT_TRACK |
-        MediaPlayerEntityFeature.PREVIOUS_TRACK |
-        MediaPlayerEntityFeature.VOLUME_SET |
-        MediaPlayerEntityFeature.VOLUME_MUTE |
-        MediaPlayerEntityFeature.BROWSE_MEDIA |
-        MediaPlayerEntityFeature.PLAY_MEDIA
+        MediaPlayerEntityFeature.PLAY
+        | MediaPlayerEntityFeature.PAUSE
+        | MediaPlayerEntityFeature.STOP
+        | MediaPlayerEntityFeature.NEXT_TRACK
+        | MediaPlayerEntityFeature.PREVIOUS_TRACK
+        | MediaPlayerEntityFeature.VOLUME_SET
+        | MediaPlayerEntityFeature.VOLUME_MUTE
+        | MediaPlayerEntityFeature.BROWSE_MEDIA
+        | MediaPlayerEntityFeature.PLAY_MEDIA
+        | MediaPlayerEntityFeature.SHUFFLE_SET
+        | MediaPlayerEntityFeature.REPEAT_SET
     )
 
     def __init__(self, api: SubsonicApi, entry: ConfigEntry):
@@ -68,7 +76,10 @@ class SonicFlowMediaPlayer(MediaPlayerEntity):
             "configuration_url": entry.data.get("url"),
         }
         self._state = STATE_IDLE
-        self._media = {}
+        self._media: dict = {}
+        self._track_history: list[str] = []
+        self._history_index = -1
+        self._shuffle = False
 
     @property
     def state(self) -> str:
@@ -91,6 +102,10 @@ class SonicFlowMediaPlayer(MediaPlayerEntity):
         return self._media.get("album")
 
     @property
+    def media_album_artist(self) -> str | None:
+        return self._media.get("artist")
+
+    @property
     def media_image_url(self) -> str | None:
         cover = self._media.get("coverArt")
         return self.api.get_cover_art_url(cover) if cover else None
@@ -102,17 +117,22 @@ class SonicFlowMediaPlayer(MediaPlayerEntity):
 
     async def async_update(self) -> None:
         try:
-            if hasattr(self.api, 'get_now_playing'):
-                now = await self.api.get_now_playing(hass=self.hass)
-                user_tracks = [t for t in now if t.get("userName") == self.api.user]
-                if user_tracks:
-                    self._media = user_tracks[0]
-                    self._state = STATE_PLAYING
-                else:
-                    self._media = {}
-                    self._state = STATE_IDLE
+            now = await self.api.get_now_playing(hass=self.hass)
+            user_tracks = [t for t in now if t.get("userName") == self.api.user]
+            if user_tracks:
+                track = user_tracks[0]
+                track_id = track.get("id", "")
+                if track_id and track_id != self._media.get("id"):
+                    self._media = track
+                    if track_id not in self._track_history:
+                        self._track_history.append(track_id)
+                        self._history_index = len(self._track_history) - 1
+                self._state = STATE_PLAYING
+            else:
+                self._media = {}
+                self._state = STATE_IDLE
         except Exception as err:
-            _LOGGER.debug("Update skipped: %s", err)
+            _LOGGER.debug("Update failed: %s", err)
 
     async def async_media_play(self) -> None:
         self._state = STATE_PLAYING
@@ -126,63 +146,72 @@ class SonicFlowMediaPlayer(MediaPlayerEntity):
         self._state = STATE_IDLE
         self.async_write_ha_state()
 
-    async def async_media_next_track(self) -> None: pass
-    async def async_media_previous_track(self) -> None: pass
-    async def async_set_volume_level(self, volume: float) -> None: pass
-    async def async_mute_volume(self, mute: bool) -> None: pass
+    async def async_media_next_track(self) -> None:
+        if self._track_history and self._history_index < len(self._track_history) - 1:
+            self._history_index += 1
+            next_id = self._track_history[self._history_index]
+            stream_url = self.api.get_stream_url(next_id)
+            self._attr_media_content_id = stream_url
+            self._media = {"id": next_id, "title": next_id}
+            self._state = STATE_PLAYING
+            self.async_write_ha_state()
+
+    async def async_media_previous_track(self) -> None:
+        if self._track_history and self._history_index > 0:
+            self._history_index -= 1
+            prev_id = self._track_history[self._history_index]
+            stream_url = self.api.get_stream_url(prev_id)
+            self._attr_media_content_id = stream_url
+            self._media = {"id": prev_id, "title": prev_id}
+            self._state = STATE_PLAYING
+            self.async_write_ha_state()
+
+    async def async_set_volume_level(self, volume: float) -> None:
+        _LOGGER.debug("Volume set requested: %s (local playback only)", volume)
+
+    async def async_mute_volume(self, mute: bool) -> None:
+        _LOGGER.debug("Mute requested: %s (local playback only)", mute)
+
+    async def async_set_shuffle(self, shuffle: bool) -> None:
+        self._shuffle = shuffle
+        self.async_write_ha_state()
+
+    async def async_set_repeat(self, repeat) -> None:
+        _LOGGER.debug("Repeat mode set: %s", repeat)
 
     async def async_play_media(self, media_type: str, media_id: str, **kwargs) -> None:
-        _LOGGER.info("▶️ Play requested: %s (type: %s)", media_id, media_type)
-        # Формируем авторизованную ссылку на поток
+        _LOGGER.info("Play requested: %s (type: %s)", media_id, media_type)
         stream_url = self.api.get_stream_url(media_id)
         self._media = {"id": media_id, "title": media_id, "coverArt": ""}
         self._attr_media_content_id = stream_url
         self._state = STATE_PLAYING
+        if media_id not in self._track_history:
+            self._track_history.append(media_id)
+            self._history_index = len(self._track_history) - 1
         self.async_write_ha_state()
 
     async def async_browse_media(self, media_content_type=None, media_content_id=None):
-        """Возвращает дерево медиа-библиотеки (исправленная сигнатура HA)."""
-        if media_content_type is None or media_content_type == "library":
+        from ..media_source import SubsonicSource
+
+        entry = self.hass.config_entries.async_entries(DOMAIN)
+        if not entry:
             return BrowseMedia(
-                media_class="directory",
+                media_class=MEDIA_CLASS_DIRECTORY,
                 media_content_type="library",
                 media_content_id="",
                 title="SonicFlow Library",
-                can_play=False,
-                can_expand=True,
-                children=[
-                    BrowseMedia(
-                        media_class="artist",
-                        media_content_type="artists",
-                        media_content_id="artists",
-                        title="Artists",
-                        can_play=False,
-                        can_expand=True,
-                    ),
-                    BrowseMedia(
-                        media_class="album",
-                        media_content_type="albums",
-                        media_content_id="albums",
-                        title="Albums",
-                        can_play=False,
-                        can_expand=True,
-                    ),
-                    BrowseMedia(
-                        media_class="playlist",
-                        media_content_type="playlists",
-                        media_content_id="playlists",
-                        title="Playlists",
-                        can_play=False,
-                        can_expand=True,
-                    ),
-                ]
+                can_play=False, can_expand=False,
             )
-        # Заглушка для вложенных папок (чтобы не падало при клике)
-        return BrowseMedia(
-            media_class="directory",
-            media_content_type=media_content_type or "",
-            media_content_id=media_content_id or "",
-            title="Loading...",
-            can_play=False,
-            can_expand=False,
-        )
+
+        source = SubsonicSource(self.hass, entry[0])
+        item = MediaSourceItem.identifier_to_item(media_content_id or "")
+        try:
+            return await source.async_browse_media(item)
+        except Exception:
+            return BrowseMedia(
+                media_class=MEDIA_CLASS_DIRECTORY,
+                media_content_type="library",
+                media_content_id="",
+                title="SonicFlow Library",
+                can_play=False, can_expand=False,
+            )

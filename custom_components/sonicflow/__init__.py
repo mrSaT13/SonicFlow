@@ -11,16 +11,16 @@ from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import DOMAIN, CONF_URL, CONF_USER, CONF_PASSWORD, CONF_APP
 from .subsonicApi import SubsonicApi
+from .services import async_setup_services, async_unload_services
 
-PLATFORMS: Final[list[Platform]] = [Platform.MEDIA_PLAYER]
+PLATFORMS: Final[list[Platform]] = [Platform.MEDIA_PLAYER, Platform.SENSOR]
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up SonicFlow from a config entry."""
     _LOGGER.info("Setting up SonicFlow integration for %s", entry.title)
-    
-    # Initialize API with correct signature
+
     api = SubsonicApi(
         userAgent="HomeAssistant/SonicFlow",
         config={
@@ -31,44 +31,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         },
         session=None,
     )
-    
+
     try:
-        # Test connection
         if not await api.ping(hass=hass):
             raise ConfigEntryNotReady("Failed to connect to SonicFlow server")
+    except ConfigEntryNotReady:
+        raise
     except Exception as err:
         await api.close()
         raise ConfigEntryNotReady(f"Error connecting to SonicFlow: {err}") from err
-    
-    # ✅ ИСПРАВЛЕНО: сохраняем ВНУТРИ DOMAIN, а не в корне hass.data
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = api
-    
-    # Forward entry setup to platforms
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    
+
+    await async_setup_services(hass)
+
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    
-    # ✅ ИСПРАВЛЕНО: корректная очистка из DOMAIN
+
     if unload_ok and entry.entry_id in hass.data.get(DOMAIN, {}):
         api = hass.data[DOMAIN][entry.entry_id]
         await api.close()
         del hass.data[DOMAIN][entry.entry_id]
-    
+
+    remaining = len(hass.data.get(DOMAIN, {}))
+    if remaining == 0:
+        await async_unload_services(hass)
+
     return unload_ok
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate old entry."""
     _LOGGER.debug("Migrating from version %s", config_entry.version)
-    
     if config_entry.version == 1:
         pass
-    
     _LOGGER.info("Migration to version %s successful", config_entry.version)
     return True

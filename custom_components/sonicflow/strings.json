@@ -48,5 +48,39 @@
         }
       }
     }
+  },
+  "services": {
+    "play_favorite": {
+      "name": "Play Favorite",
+      "description": "Play a random favorite song."
+    },
+    "play_random": {
+      "name": "Play Random",
+      "description": "Play a random song.",
+      "fields": {
+        "count": {
+          "name": "Count",
+          "description": "Number of random songs to pick from."
+        }
+      }
+    },
+    "search_and_play": {
+      "name": "Search and Play",
+      "description": "Search and play the first result.",
+      "fields": {
+        "query": {
+          "name": "Query",
+          "description": "Search query."
+        }
+      }
+    },
+    "star": {
+      "name": "Star",
+      "description": "Star an item on the server."
+    },
+    "unstar": {
+      "name": "Unstar",
+      "description": "Unstar an item on the server."
+    }
   }
 }

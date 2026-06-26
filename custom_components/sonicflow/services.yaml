@@ -1,0 +1,58 @@
+play_favorite:
+  name: Play Favorite
+  description: Play a random favorite song on the first available media player.
+  target:
+    entity:
+      domain: media_player
+
+play_random:
+  name: Play Random
+  description: Play a random song on the first available media player.
+  target:
+    entity:
+      domain: media_player
+  fields:
+    count:
+      name: Count
+      description: Number of random songs to pick from.
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 500
+
+search_and_play:
+  name: Search and Play
+  description: Search for a song and play the first result.
+  target:
+    entity:
+      domain: media_player
+  fields:
+    query:
+      name: Query
+      description: Search query (song, artist, or album name).
+      required: true
+      selector:
+        text:
+
+star:
+  name: Star
+  description: Star (favorite) an item on the server.
+  fields:
+    item_id:
+      name: Item ID
+      description: The ID of the item to star (e.g., "al-123", "s-456").
+      required: true
+      selector:
+        text:
+
+unstar:
+  name: Unstar
+  description: Unstar (unfavorite) an item on the server.
+  fields:
+    item_id:
+      name: Item ID
+      description: The ID of the item to unstar.
+      required: true
+      selector:
+        text:

@@ -1,4 +1,8 @@
-from homeassistant.components.media_player import BrowseError, MediaClass, MediaType
+"""Media source provider for SonicFlow."""
+from __future__ import annotations
+
+import logging
+from homeassistant.components.media_player import MediaClass, MediaType
 from homeassistant.components.media_source.error import Unresolvable
 from homeassistant.components.media_source.models import (
     BrowseMediaSource,
@@ -7,11 +11,20 @@ from homeassistant.components.media_source.models import (
     PlayMedia,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, LOGGER
+from .const import DOMAIN
 from .subsonicApi import SubsonicApi
 from .translation import getTranslation
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _cover_art_url(api: SubsonicApi, item: dict) -> str | None:
+    art = item.get("coverArt")
+    if art:
+        return api.get_cover_art_url(art)
+    return None
 
 
 class SubsonicSource(MediaSource):
@@ -24,535 +37,363 @@ class SubsonicSource(MediaSource):
 
     @property
     def title(self) -> str:
-        return "Subsonic" if self.entry is None else self.entry.title
+        return "SonicFlow" if self.entry is None else self.entry.title
 
     @property
     def artists(self) -> bool:
-        return self.__getOption("artists", True)
-    
+        return self._get_option("artists", True)
+
     @property
     def albums(self) -> bool:
-        return self.__getOption("albums", True)
-    
+        return self._get_option("albums", True)
+
     @property
     def playlists(self) -> bool:
-        return self.__getOption("playlists", True)
-    
+        return self._get_option("playlists", True)
+
     @property
     def favorites(self) -> bool:
-        return self.__getOption("favorites", True)
+        return self._get_option("favorites", True)
 
     @property
     def genres(self) -> bool:
-        return self.__getOption("genres", True)
+        return self._get_option("genres", True)
 
     @property
     def radio(self) -> bool:
-        return self.__getOption("radio", False)
+        return self._get_option("radio", False)
+
+    @property
+    def songs(self) -> bool:
+        return self._get_option("songs", True)
 
     @property
     def api(self) -> SubsonicApi:
         if self.__api is None:
-            self.__api = self.hass.data[DOMAIN]
-
+            self.__api = self.hass.data[DOMAIN][self.entry.entry_id]
         return self.__api
 
-    def __getProperty(self, property, dafultValue=None):
+    def _get_option(self, option, default=None):
         if (self.entry is not None
-            and self.entry.data is not None
-            and property in self.entry.data):
-            return self.entry.data[property]
-
-        if isinstance(dafultValue, Exception):
-            raise dafultValue
-        
-        return dafultValue
-    
-    def __getOption(self, option, defaultValue=None):
-        if (self.entry is not None
-            and self.entry.options is not None
-            and option in self.entry.options):
+                and self.entry.options is not None
+                and option in self.entry.options):
             return self.entry.options[option]
+        return default
 
-        if isinstance(defaultValue, Exception):
-            raise defaultValue
-
-        return defaultValue
-    
-    def __getTranslation(self, key: str) -> str:
+    def _tr(self, key: str) -> str:
         lang = self.hass.config.language
         return getTranslation(lang, key)
 
-
-
     async def async_resolve_media(self, item: MediaSourceItem) -> PlayMedia:
+        if item.identifier is None:
+            raise Unresolvable("No media identifier")
+
         if item.identifier.startswith("radio/"):
-            return await self.async_resolve_radio(item.identifier)
-        
+            return await self._resolve_radio(item.identifier)
+
         if item.identifier.startswith("song/"):
-            return await self.async_resolve_song(item.identifier)
-        
-        raise Unresolvable("Can't resolve media item")
-    
-    async def async_resolve_radio(self, identifier: str) -> PlayMedia:
-        radioId = identifier.replace("radio/", "")
-        radios = await self.api.getRadioStations()
-        radio = next((r for r in radios if r["id"] == radioId), None)
+            return await self._resolve_song(item.identifier)
 
+        raise Unresolvable(f"Can't resolve media item: {item.identifier}")
+
+    async def _resolve_radio(self, identifier: str) -> PlayMedia:
+        radio_id = identifier.removeprefix("radio/")
+        radios = await self.api.get_radio_stations(hass=self.hass)
+        radio = next((r for r in radios if r["id"] == radio_id), None)
         if radio is None:
-            raise Unresolvable(f"Radio {radioId} not found")
-
+            raise Unresolvable(f"Radio {radio_id} not found")
         return PlayMedia(radio["streamUrl"], "audio/mpeg")
 
-    async def async_resolve_song(self, identifier: str) -> PlayMedia:
-        songId = identifier.replace("song/", "")
-        song = await self.api.getSong(songId)
-        contentType = song["contentType"] if "contentType" in song else "audio/mpeg"
-
-        streamUrl = self.api.getSongStreamUrl(songId)
-
-        return PlayMedia(streamUrl, contentType)
-
-
+    async def _resolve_song(self, identifier: str) -> PlayMedia:
+        song_id = identifier.removeprefix("song/")
+        song = await self.api.get_song(song_id, hass=self.hass)
+        content_type = song.get("contentType", "audio/mpeg")
+        stream_url = self.api.get_stream_url(song_id)
+        return PlayMedia(stream_url, content_type)
 
     async def async_browse_media(self, item: MediaSourceItem) -> BrowseMediaSource:
-
         identifier = item.identifier or ""
 
         if identifier.startswith("browser/"):
-            return await self.async_browser_item(item.identifier.replace("browser/", ""))
-        elif identifier.startswith("album/"):
-            return await self.async_list_songs_album(identifier.replace("album/", ""))
-        elif identifier.startswith("playlist/"):
-            return await self.async_list_songs_playlist(identifier.replace("playlist/", ""))
-        elif identifier.startswith("genre/"):
-            return await self.async_list_songs_genre(identifier.replace("genre/", ""))
-        elif identifier.startswith("artist/"):
-            return await self.async_list_albums_artist(identifier.replace("artist/", ""))
+            return await self._browse_category(identifier.removeprefix("browser/"))
+        if identifier.startswith("album/"):
+            return await self._browse_album(identifier.removeprefix("album/"))
+        if identifier.startswith("playlist/"):
+            return await self._browse_playlist(identifier.removeprefix("playlist/"))
+        if identifier.startswith("genre/"):
+            return await self._browse_genre(identifier.removeprefix("genre/"))
+        if identifier.startswith("artist/"):
+            return await self._browse_artist(identifier.removeprefix("artist/"))
 
+        return await self._browse_root()
 
-        return await self.async_browse_root()
-    
-    async def async_browse_root(self) -> BrowseMediaSource:
-
-        childrens = []
-        lang = self.__getTranslation("subsonic")
+    async def _browse_root(self) -> BrowseMediaSource:
+        children = []
 
         if self.artists:
-            childrens.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier="browser/artists",
-                    media_class=MediaClass.DIRECTORY,
-                    media_content_type=MediaType.MUSIC,
-                    title=self.__getTranslation("artists"),
-                    can_play=False,
-                    can_expand=True,
-                    # thumbnail="https://avatars.githubusercontent.com/u/26692192?s=256"
-                )
-            )
-
+            children.append(BrowseMediaSource(
+                domain=DOMAIN, identifier="browser/artists",
+                media_class=MediaClass.DIRECTORY, media_content_type=MediaType.MUSIC,
+                title=self._tr("artists"), can_play=False, can_expand=True,
+            ))
         if self.albums:
-            childrens.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier="browser/albums",
-                    media_class=MediaClass.DIRECTORY,
-                    media_content_type=MediaType.MUSIC,
-                    title=self.__getTranslation("albums"),
-                    can_play=False,
-                    can_expand=True,
-                )
-            )
-
+            children.append(BrowseMediaSource(
+                domain=DOMAIN, identifier="browser/albums",
+                media_class=MediaClass.DIRECTORY, media_content_type=MediaType.MUSIC,
+                title=self._tr("albums"), can_play=False, can_expand=True,
+            ))
         if self.playlists:
-            childrens.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier="browser/playlist",
-                    media_class=MediaClass.DIRECTORY,
-                    media_content_type=MediaType.MUSIC,
-                    title=self.__getTranslation("playlists"),
-                    can_play=False,
-                    can_expand=True,
-                )
-            )
-
-        if self.radio:
-            childrens.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier="browser/radio",
-                    media_class=MediaClass.DIRECTORY,
-                    media_content_type=MediaType.MUSIC,
-                    title=self.__getTranslation("radios"),
-                    can_play=False,
-                    can_expand=True,
-                )
-            )
-
-        """
+            children.append(BrowseMediaSource(
+                domain=DOMAIN, identifier="browser/playlists",
+                media_class=MediaClass.DIRECTORY, media_content_type=MediaType.MUSIC,
+                title=self._tr("playlists"), can_play=False, can_expand=True,
+            ))
         if self.favorites:
-            childrens.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier="browser/favorites",
-                    media_class=MediaClass.DIRECTORY,
-                    media_content_type=MediaType.MUSIC,
-                    title=self.__getTranslation("favorites"),
-                    can_play=False,
-                    can_expand=True,
-                )
-            )
-        """
-
+            children.append(BrowseMediaSource(
+                domain=DOMAIN, identifier="browser/favorites",
+                media_class=MediaClass.DIRECTORY, media_content_type=MediaType.MUSIC,
+                title=self._tr("favorites"), can_play=False, can_expand=True,
+            ))
         if self.genres:
-            childrens.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier="browser/genres",
-                    media_class=MediaClass.DIRECTORY,
-                    media_content_type=MediaType.MUSIC,
-                    title=self.__getTranslation("genres"),
-                    can_play=False,
-                    can_expand=True,
-                )
-            )
+            children.append(BrowseMediaSource(
+                domain=DOMAIN, identifier="browser/genres",
+                media_class=MediaClass.DIRECTORY, media_content_type=MediaType.MUSIC,
+                title=self._tr("genres"), can_play=False, can_expand=True,
+            ))
+        if self.radio:
+            children.append(BrowseMediaSource(
+                domain=DOMAIN, identifier="browser/radio",
+                media_class=MediaClass.DIRECTORY, media_content_type=MediaType.MUSIC,
+                title=self._tr("radios"), can_play=False, can_expand=True,
+            ))
+        if self.songs:
+            children.append(BrowseMediaSource(
+                domain=DOMAIN, identifier="browser/recent",
+                media_class=MediaClass.DIRECTORY, media_content_type=MediaType.MUSIC,
+                title=self._tr("recently_added"), can_play=False, can_expand=True,
+            ))
+        children.append(BrowseMediaSource(
+            domain=DOMAIN, identifier="browser/random",
+            media_class=MediaClass.DIRECTORY, media_content_type=MediaType.MUSIC,
+            title=self._tr("random"), can_play=False, can_expand=True,
+        ))
 
         return BrowseMediaSource(
-            domain=DOMAIN,
-            identifier=None,
-            media_class=MediaClass.CHANNEL,
-            media_content_type=MediaType.MUSIC,
-            title=self.title,
-            can_play=False,
-            can_expand=True,
+            domain=DOMAIN, identifier=None,
+            media_class=MediaClass.CHANNEL, media_content_type=MediaType.MUSIC,
+            title=self.title, can_play=False, can_expand=True,
             thumbnail="https://avatars.githubusercontent.com/u/26692192?s=256",
-            children_media_class=MediaClass.DIRECTORY,
-            children=childrens,
+            children_media_class=MediaClass.DIRECTORY, children=children,
         )
-    
-    async def async_browser_item(self, identifier: str) -> BrowseMediaSource:
-        title = identifier
-        childrens = []
-        content_type = MediaType.MUSIC
-        children_type = MediaClass.DIRECTORY
 
-        if identifier == "radio":
-            title = self.__getTranslation("radios")
-            childrens = await self.async_list_radios()
-            children_type = MediaClass.MUSIC
-        elif identifier == "albums":
-            title = self.__getTranslation("albums")
-            childrens = await self.async_list_albums()
-            children_type = MediaClass.ALBUM
-        elif identifier == "playlist":
-            title = self.__getTranslation("playlists")
-            childrens = await self.async_list_playlists()
-            children_type = MediaClass.PLAYLIST
-        elif identifier == "genres":
-            title = self.__getTranslation("genres")
-            childrens = await self.async_list_genres()
-            children_type = MediaClass.GENRE
-        elif identifier == "artists":
-            title = self.__getTranslation("artists")
-            childrens = await self.async_list_artists()
-            children_type = MediaClass.ARTIST
-
+    async def _browse_category(self, category: str) -> BrowseMediaSource:
+        handlers = {
+            "artists": (self._tr("artists"), self._list_artists, MediaClass.ARTIST),
+            "albums": (self._tr("albums"), self._list_albums, MediaClass.ALBUM),
+            "playlists": (self._tr("playlists"), self._list_playlists, MediaClass.PLAYLIST),
+            "favorites": (self._tr("favorites"), self._list_favorites, MediaClass.MUSIC),
+            "genres": (self._tr("genres"), self._list_genres, MediaClass.GENRE),
+            "radio": (self._tr("radios"), self._list_radios, MediaClass.MUSIC),
+            "recent": (self._tr("recently_added"), self._list_recent, MediaClass.MUSIC),
+            "random": (self._tr("random"), self._list_random, MediaClass.MUSIC),
+        }
+        if category not in handlers:
+            return BrowseMediaSource(
+                domain=DOMAIN, identifier=category,
+                media_class=MediaClass.DIRECTORY, media_content_type=MediaType.MUSIC,
+                title=category, can_play=False, can_expand=False,
+            )
+        title, handler, child_type = handlers[category]
+        items = await handler()
         return BrowseMediaSource(
-            domain=DOMAIN,
-            identifier=identifier,
-            media_class=MediaClass.DIRECTORY,
-            media_content_type=content_type,
-            title=title,
-            can_play=False,
-            can_expand=True,
-            children_media_class=children_type,
-            children=childrens,
+            domain=DOMAIN, identifier=f"browser/{category}",
+            media_class=MediaClass.DIRECTORY, media_content_type=MediaType.MUSIC,
+            title=title, can_play=False, can_expand=True,
+            children_media_class=child_type, children=items,
         )
-    
-    async def async_list_radios(self) -> list[BrowseMediaSource]:
-        items: list[BrowseMediaSource] = []
-        radios = await self.api.getRadioStations()
 
+    async def _list_radios(self) -> list[BrowseMediaSource]:
+        items = []
+        radios = await self.api.get_radio_stations(hass=self.hass)
         for radio in radios:
-            items.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier=f"radio/{radio['id']}",
-                    media_class=MediaClass.MUSIC,
-                    media_content_type=MediaType.MUSIC,
-                    title=radio["name"],
-                    can_play=True,
-                    can_expand=False,
-                )
-            )
-
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"radio/{radio['id']}",
+                media_class=MediaClass.MUSIC, media_content_type=MediaType.MUSIC,
+                title=radio.get("name", "Radio"), can_play=True, can_expand=False,
+            ))
         return items
-    
-    async def async_list_albums(self) -> list[BrowseMediaSource]:
-        items: list[BrowseMediaSource] = []
-        albums = await self.api.getAlbums()
 
+    async def _list_albums(self) -> list[BrowseMediaSource]:
+        items = []
+        albums = await self.api.get_albums(hass=self.hass)
         for album in albums:
-            coveart = None
-
-            if ("coverArt" in album
-                and album["coverArt"] is not None
-                and album["coverArt"] != ""):
-                coveart = self.api.getCoverArtUrl(album["coverArt"])
-
-            items.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier=f"album/{album['id']}",
-                    media_class=MediaClass.ALBUM,
-                    media_content_type=MediaType.ALBUM,
-                    title=album["name"],
-                    can_play=False,
-                    can_expand=True,
-                    thumbnail=coveart,
-                )
-            )
-
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"album/{album['id']}",
+                media_class=MediaClass.ALBUM, media_content_type=MediaType.ALBUM,
+                title=album.get("name", "Unknown"), can_play=False, can_expand=True,
+                thumbnail=_cover_art_url(self.api, album),
+            ))
         return items
-    
-    async def async_list_playlists(self) -> list[BrowseMediaSource]:
-        items: list[BrowseMediaSource] = []
-        playlists = await self.api.getPlaylists()
 
-        for playlist in playlists:
-            coveart = None
-
-            if ("coverArt" in playlist
-                and playlist["coverArt"] is not None
-                and playlist["coverArt"] != ""):
-                coveart = self.api.getCoverArtUrl(playlist["coverArt"])
-
-            items.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier=f"playlist/{playlist['id']}",
-                    media_class=MediaClass.PLAYLIST,
-                    media_content_type=MediaType.PLAYLIST,
-                    title=playlist["name"],
-                    can_play=False,
-                    can_expand=True,
-                    thumbnail=coveart
-                )
-            )
-
+    async def _list_playlists(self) -> list[BrowseMediaSource]:
+        items = []
+        playlists = await self.api.get_playlists(hass=self.hass)
+        for pl in playlists:
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"playlist/{pl['id']}",
+                media_class=MediaClass.PLAYLIST, media_content_type=MediaType.PLAYLIST,
+                title=pl.get("name", "Unknown"), can_play=False, can_expand=True,
+                thumbnail=_cover_art_url(self.api, pl),
+            ))
         return items
-    
-    async def async_list_genres(self) -> list[BrowseMediaSource]:
-        items: list[BrowseMediaSource] = []
-        genres = await self.api.getGenres()
 
+    async def _list_genres(self) -> list[BrowseMediaSource]:
+        items = []
+        genres = await self.api.get_genres(hass=self.hass)
         for genre in genres:
-            items.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier=f"genre/{genre}",
-                    media_class=MediaClass.GENRE,
-                    media_content_type=MediaType.MUSIC,
-                    title=genre,
-                    can_play=False,
-                    can_expand=True,
-                )
-            )
-
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"genre/{genre}",
+                media_class=MediaClass.GENRE, media_content_type=MediaType.MUSIC,
+                title=genre, can_play=False, can_expand=True,
+            ))
         return items
 
-    async def async_list_artists(self) -> list[BrowseMediaSource]:
-        items: list[BrowseMediaSource] = []
-
-        artists = await self.api.getArtists()
-
+    async def _list_artists(self) -> list[BrowseMediaSource]:
+        items = []
+        artists = await self.api.get_artists(hass=self.hass)
         for artist in artists:
-            coverArt = None
-
-            if ("coverArt" in artist
-                and artist["coverArt"] is not None
-                and artist["coverArt"] != ""):
-                coverArt = self.api.getCoverArtUrl(artist["coverArt"])
-
-            items.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier=f"artist/{artist['id']}",
-                    media_class=MediaClass.ARTIST,
-                    media_content_type=MediaType.MUSIC,
-                    title=artist["name"],
-                    can_play=False,
-                    can_expand=True,
-                    thumbnail=coverArt
-                )
-            )
-
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"artist/{artist['id']}",
+                media_class=MediaClass.ARTIST, media_content_type=MediaType.MUSIC,
+                title=artist.get("name", "Unknown"), can_play=False, can_expand=True,
+                thumbnail=_cover_art_url(self.api, artist),
+            ))
         return items
 
-        
+    async def _list_favorites(self) -> list[BrowseMediaSource]:
+        starred = await self.api.get_starred(hass=self.hass)
+        items = []
+        for song in starred.get("songs", []):
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"song/{song['id']}",
+                media_class=MediaClass.MUSIC, media_content_type=MediaType.MUSIC,
+                title=song.get("title", "Unknown"), can_play=True, can_expand=False,
+                thumbnail=_cover_art_url(self.api, song),
+            ))
+        for album in starred.get("albums", []):
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"album/{album['id']}",
+                media_class=MediaClass.ALBUM, media_content_type=MediaType.ALBUM,
+                title=album.get("name", "Unknown"), can_play=False, can_expand=True,
+                thumbnail=_cover_art_url(self.api, album),
+            ))
+        for artist in starred.get("artists", []):
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"artist/{artist['id']}",
+                media_class=MediaClass.ARTIST, media_content_type=MediaType.MUSIC,
+                title=artist.get("name", "Unknown"), can_play=False, can_expand=True,
+                thumbnail=_cover_art_url(self.api, artist),
+            ))
+        return items
 
-    async def async_list_songs_album(self, albumId: str) -> list[BrowseMediaSource]:
-        items: list[BrowseMediaSource] = []
-        album = await self.api.getAlbum(albumId)
-
-        for song in album["songs"]:
-            coveart = None
-
-            if ("coverArt" in album
-                and album["coverArt"] is not None
-                and album["coverArt"] != ""):
-                coveart = self.api.getCoverArtUrl(album["coverArt"])
-
-            items.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier=f"song/{song['id']}",
-                    media_class=MediaClass.MUSIC,
-                    media_content_type=MediaType.MUSIC,
-                    title=song["title"],
-                    can_play=True,
-                    can_expand=False,
-                    thumbnail=coveart
-                )
-            )
-
-        return BrowseMediaSource(
-            domain=DOMAIN,
-            identifier=f"album/{albumId}",
-            media_class=MediaClass.ALBUM,
-            media_content_type=MediaType.ALBUM,
-            title=album["name"],
-            can_play=False,
-            can_expand=True,
-            thumbnail=coveart,
-            children_media_class=MediaClass.MUSIC,
-            children=items,
-        )
-    
-    async def async_list_songs_playlist(self, playlistId: str) -> list[BrowseMediaSource]:
-        items: list[BrowseMediaSource] = []
-
-        playlist = await self.api.getPlaylist(playlistId)
-        coveart = None
-
-        if ("coverArt" in playlist
-            and playlist["coverArt"] is not None
-            and playlist["coverArt"] != ""):
-            coveart = self.api.getCoverArtUrl(playlist["coverArt"])
-
-        for song in playlist["songs"]:
-            items.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier=f"song/{song['id']}",
-                    media_class=MediaClass.MUSIC,
-                    media_content_type=MediaType.MUSIC,
-                    title=song["title"],
-                    can_play=True,
-                    can_expand=False,
-                    thumbnail=coveart
-                )
-            )
-
-        return BrowseMediaSource(
-            domain=DOMAIN,
-            identifier=f"playlist/{playlistId}",
-            media_class=MediaClass.PLAYLIST,
-            media_content_type=MediaType.PLAYLIST,
-            title=playlist["name"],
-            can_play=False,
-            can_expand=True,
-            thumbnail=coveart,
-            children_media_class=MediaClass.MUSIC,
-            children=items,
-        )
-    
-    async def async_list_songs_genre(self, genreId: str) -> list[BrowseMediaSource]:
-        items: list[BrowseMediaSource] = []
-
-        songs = await self.api.getSongsByGenre(genreId)
-
+    async def _list_recent(self) -> list[BrowseMediaSource]:
+        songs = await self.api.get_random_songs(50, hass=self.hass)
+        items = []
         for song in songs:
-            coveart = None
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"song/{song['id']}",
+                media_class=MediaClass.MUSIC, media_content_type=MediaType.MUSIC,
+                title=song.get("title", "Unknown"), can_play=True, can_expand=False,
+                thumbnail=_cover_art_url(self.api, song),
+            ))
+        return items
 
-            if ("coverArt" in song
-                and song["coverArt"] is not None
-                and song["coverArt"] != ""):
-                coveart = self.api.getCoverArtUrl(song["coverArt"])
+    async def _list_random(self) -> list[BrowseMediaSource]:
+        songs = await self.api.get_random_songs(30, hass=self.hass)
+        items = []
+        for song in songs:
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"song/{song['id']}",
+                media_class=MediaClass.MUSIC, media_content_type=MediaType.MUSIC,
+                title=song.get("title", "Unknown"), can_play=True, can_expand=False,
+                thumbnail=_cover_art_url(self.api, song),
+            ))
+        return items
 
-            items.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier=f"song/{song['id']}",
-                    media_class=MediaClass.MUSIC,
-                    media_content_type=MediaType.MUSIC,
-                    title=song["title"],
-                    can_play=True,
-                    can_expand=False,
-                    thumbnail=coveart
-                )
-            )
-
+    async def _browse_album(self, album_id: str) -> BrowseMediaSource:
+        album = await self.api.get_album(album_id, hass=self.hass)
+        items = []
+        for song in album.get("songs", []):
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"song/{song['id']}",
+                media_class=MediaClass.MUSIC, media_content_type=MediaType.MUSIC,
+                title=song.get("title", "Unknown"), can_play=True, can_expand=False,
+                thumbnail=_cover_art_url(self.api, album),
+            ))
         return BrowseMediaSource(
-            domain=DOMAIN,
-            identifier=f"genre/{genreId}",
-            media_class=MediaClass.GENRE,
-            media_content_type=MediaType.MUSIC,
-            title=genreId,
-            can_play=False,
-            can_expand=True,
-            children_media_class=MediaClass.MUSIC,
-            children=items,
+            domain=DOMAIN, identifier=f"album/{album_id}",
+            media_class=MediaClass.ALBUM, media_content_type=MediaType.ALBUM,
+            title=album.get("name", "Unknown"), can_play=False, can_expand=True,
+            thumbnail=_cover_art_url(self.api, album),
+            children_media_class=MediaClass.MUSIC, children=items,
         )
-        
-    async def async_list_albums_artist(self, artistId: str) -> list[BrowseMediaSource]:
-        items: list[BrowseMediaSource] = []
 
-        artist = await self.api.getArtist(artistId)
-        coveart = None
-
-        if ("coverArt" in artist
-            and artist["coverArt"] is not None
-            and artist["coverArt"] != ""):
-            coveart = self.api.getCoverArtUrl(artist["coverArt"])
-
-        for album in artist["albums"]:
-            albumCoveart = None
-
-            if ("coverArt" in album
-                and album["coverArt"] is not None
-                and album["coverArt"] != ""):
-                albumCoveart = self.api.getCoverArtUrl(album["coverArt"])
-
-            items.append(
-                BrowseMediaSource(
-                    domain=DOMAIN,
-                    identifier=f"album/{album['id']}",
-                    media_class=MediaClass.ALBUM,
-                    media_content_type=MediaType.ALBUM,
-                    title=album["name"],
-                    can_play=False,
-                    can_expand=True,
-                    thumbnail=albumCoveart
-                )
-            )
-
+    async def _browse_playlist(self, playlist_id: str) -> BrowseMediaSource:
+        playlist = await self.api.get_playlist(playlist_id, hass=self.hass)
+        items = []
+        for song in playlist.get("songs", []):
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"song/{song['id']}",
+                media_class=MediaClass.MUSIC, media_content_type=MediaType.MUSIC,
+                title=song.get("title", "Unknown"), can_play=True, can_expand=False,
+                thumbnail=_cover_art_url(self.api, playlist),
+            ))
         return BrowseMediaSource(
-            domain=DOMAIN,
-            identifier=f"artist/{artistId}",
-            media_class=MediaClass.ARTIST,
-            media_content_type=MediaType.MUSIC,
-            title=artist["name"],
-            can_play=False,
-            can_expand=True,
-            thumbnail=coveart,
-            children_media_class=MediaClass.ALBUM,
-            children=items,
+            domain=DOMAIN, identifier=f"playlist/{playlist_id}",
+            media_class=MediaClass.PLAYLIST, media_content_type=MediaType.PLAYLIST,
+            title=playlist.get("name", "Unknown"), can_play=False, can_expand=True,
+            thumbnail=_cover_art_url(self.api, playlist),
+            children_media_class=MediaClass.MUSIC, children=items,
         )
+
+    async def _browse_genre(self, genre_id: str) -> BrowseMediaSource:
+        songs = await self.api.get_songs_by_genre(genre_id, hass=self.hass)
+        items = []
+        for song in songs:
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"song/{song['id']}",
+                media_class=MediaClass.MUSIC, media_content_type=MediaType.MUSIC,
+                title=song.get("title", "Unknown"), can_play=True, can_expand=False,
+                thumbnail=_cover_art_url(self.api, song),
+            ))
+        return BrowseMediaSource(
+            domain=DOMAIN, identifier=f"genre/{genre_id}",
+            media_class=MediaClass.GENRE, media_content_type=MediaType.MUSIC,
+            title=genre_id, can_play=False, can_expand=True,
+            children_media_class=MediaClass.MUSIC, children=items,
+        )
+
+    async def _browse_artist(self, artist_id: str) -> BrowseMediaSource:
+        artist = await self.api.get_artist(artist_id, hass=self.hass)
+        items = []
+        for album in artist.get("albums", []):
+            items.append(BrowseMediaSource(
+                domain=DOMAIN, identifier=f"album/{album['id']}",
+                media_class=MediaClass.ALBUM, media_content_type=MediaType.ALBUM,
+                title=album.get("name", "Unknown"), can_play=False, can_expand=True,
+                thumbnail=_cover_art_url(self.api, album),
+            ))
+        return BrowseMediaSource(
+            domain=DOMAIN, identifier=f"artist/{artist_id}",
+            media_class=MediaClass.ARTIST, media_content_type=MediaType.MUSIC,
+            title=artist.get("name", "Unknown"), can_play=False, can_expand=True,
+            thumbnail=_cover_art_url(self.api, artist),
+            children_media_class=MediaClass.ALBUM, children=items,
+        )
+
 
 async def async_get_media_source(hass: HomeAssistant) -> SubsonicSource:
-    LOGGER.warning("async_get_media_source")
-    entry = hass.config_entries.async_entries(DOMAIN)[0]
-    return SubsonicSource(hass, entry)
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if not entries:
+        return SubsonicSource(hass, None)
+    return SubsonicSource(hass, entries[0])

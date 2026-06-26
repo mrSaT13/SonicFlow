@@ -6,6 +6,6 @@
   "documentation": "https://github.com/mrSaT13/SonicFlow",
   "issue_tracker": "https://github.com/mrSaT13/SonicFlow/issues",
   "iot_class": "local_polling",
-  "version": "1.0.0",
-  "requirements": []
+  "requirements": [],
+  "version": "2.0.0"
 }
