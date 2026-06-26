@@ -68,13 +68,11 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> bool:
         session=None,
     )
     
-    # Validate URL format
     url = data.get(CONF_URL, "")
     if not url.startswith(("http://", "https://")):
         await api.close()
         raise InvalidUrl
     
-    # Test connection
     if not await api.ping(hass=hass):
         await api.close()
         raise CannotConnect
