@@ -43,3 +43,21 @@ def element_to_dict(xml_str: str, tag: str) -> dict:
 def elements_to_texts(xml_str: str, tag: str) -> list[str]:
     """Extract text content from elements."""
     return [el.text for el in find_elements(xml_str, tag) if el.text]
+
+
+# Aliases for backward compatibility with subsonicApi.py
+def getAttributes(xml_str: str) -> dict:
+    """Alias for get_root_attrs."""
+    return get_root_attrs(xml_str)
+
+def getTagAttributes(xml_str: str, tag: str) -> dict:
+    """Alias for element_to_dict."""
+    return element_to_dict(xml_str, tag)
+
+def getTagsAttributesToList(xml_str: str, tag: str) -> list[dict]:
+    """Alias for elements_to_dicts."""
+    return elements_to_dicts(xml_str, tag)
+
+def getTagsTexts(xml_str: str, tag: str) -> list[str]:
+    """Alias for elements_to_texts."""
+    return elements_to_texts(xml_str, tag)
