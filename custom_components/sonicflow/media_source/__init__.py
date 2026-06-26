@@ -9,7 +9,7 @@ from ..const import DOMAIN
 
 async def async_get_media_source(hass: HomeAssistant) -> MediaSource:
     """Set up SonicFlow media source."""
-    from ..media_source import SubsonicSource
+    from ..sonicflow_source import SubsonicSource
 
     entries = hass.config_entries.async_entries(DOMAIN)
     if not entries:

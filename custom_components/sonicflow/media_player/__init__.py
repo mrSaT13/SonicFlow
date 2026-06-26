@@ -6,16 +6,10 @@ from datetime import timedelta
 
 from homeassistant.components.media_player import (
     BrowseMedia,
+    MediaClass,
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
     MediaType,
-)
-from homeassistant.components.media_player.const import (
-    MEDIA_CLASS_DIRECTORY,
-    MEDIA_CLASS_ARTIST,
-    MEDIA_CLASS_ALBUM,
-    MEDIA_CLASS_PLAYLIST,
-    MEDIA_CLASS_MUSIC,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_IDLE, STATE_PLAYING
@@ -191,25 +185,25 @@ class SonicFlowMediaPlayer(MediaPlayerEntity):
         self.async_write_ha_state()
 
     async def async_browse_media(self, media_content_type=None, media_content_id=None):
-        from ..media_source import SubsonicSource
+        from ..sonicflow_source import SubsonicSource
 
-        entry = self.hass.config_entries.async_entries(DOMAIN)
-        if not entry:
+        entries = self.hass.config_entries.async_entries(DOMAIN)
+        if not entries:
             return BrowseMedia(
-                media_class=MEDIA_CLASS_DIRECTORY,
+                media_class=MediaClass.DIRECTORY,
                 media_content_type="library",
                 media_content_id="",
                 title="SonicFlow Library",
                 can_play=False, can_expand=False,
             )
 
-        source = SubsonicSource(self.hass, entry[0])
+        source = SubsonicSource(self.hass, entries[0])
         item = MediaSourceItem.identifier_to_item(media_content_id or "")
         try:
             return await source.async_browse_media(item)
         except Exception:
             return BrowseMedia(
-                media_class=MEDIA_CLASS_DIRECTORY,
+                media_class=MediaClass.DIRECTORY,
                 media_content_type="library",
                 media_content_id="",
                 title="SonicFlow Library",
